@@ -162,6 +162,8 @@ class HypoBot(override val bus: MessageEventBus) extends AbstractBot {
   val orderID = """(\d+)""".r
   val email = """<mailto:([^\|]+)\|\1>""".r // email
 
+  val yes = """[Yy][Ee][Ss]\.?""".r
+
   override def act: Receive = {
     case Command("editor", "shelf" :: of() :: email(user) :: Nil, message) =>
     {
@@ -182,8 +184,29 @@ class HypoBot(override val bus: MessageEventBus) extends AbstractBot {
       })
 
     case Command("editor", "book" :: delete() :: bookID(bid) :: Nil, message) =>
-      val response = OutboundMessage(message.channel, s"delete $bid")
-      publish(response)
+      editorDB.bookForID(bid.toInt) match {
+        case Some(bookToDelete) => {
+          publish(OutboundMessage(message.channel, " 確定要刪除? [yes/no]"))
+          publish(OutboundMessage(message.channel, bookToDelete.readable))
+          
+          context.become {
+            case BaseMessage(yes(), channel, message.user, _, _) => {
+              editorDB.deleteBookForID(bookToDelete.id.get)
+              publish(OutboundMessage(channel, s"已刪除 $bid"))
+              context.unbecome()
+            }
+            case BaseMessage(_, channel, _, _, _) => {
+              publish(OutboundMessage(channel, s"取消刪除。"))
+              context.unbecome()
+            }
+            case x => {
+              // ignore
+            }
+          }
+        }
+        case None => 
+          publish(OutboundMessage(message.channel, s"找不到 $bid"))
+      }
 
     case Command("editor", "order" :: restore() :: orderID(oid) :: Nil, message) =>
       val response = OutboundMessage(message.channel, s"restore $oid")
