@@ -151,12 +151,18 @@ class HypoBot(override val bus: MessageEventBus) extends AbstractBot {
 
   override def help(channel: String): OutboundMessage =
     OutboundMessage(channel,
-      s"$name hypo. \\n" +
-      "Usage: TODO")
+      s"*$name* 處理 editor 相關\\n" +
+      "`shelf {user@email.com}` - 顯示用戶 editor 內的書本\\n" +
+      "`copy book {12345} to {user@email.com}` - 把 book(12345) 拷貝到 user 的 editor\\n" +
+      "`delete book {12345}` - 刪除書本" +
+      "`restore order {67890}` - 把訂單(67890) 轉回書本，放回原用戶的 editor\\n" +
+      "`restore order {67890} to {user@email.com}` - 把訂單(67890) 轉回書本，放回用戶 user 的 editor\\n" +
+      "`json order {67890}` - 把訂單(67890) 輸出 JSON")
 
   val of = "(?:for|of)".r
   val delete = "(?:rm|removes?|deletes?|kills?)".r
   val restore = "(?:restores?|bookify)".r
+  val shelf = "(?:shelf|editor|ls)".r
 
   val bookID = """(\d+)""".r
   val orderID = """(\d+)""".r
@@ -165,7 +171,7 @@ class HypoBot(override val bus: MessageEventBus) extends AbstractBot {
   val yes = """[Yy][Ee][Ss]\.?""".r
 
   override def act: Receive = {
-    case Command("editor", "shelf" :: of() :: email(user) :: Nil, message) =>
+    case Command(shelf(), email(user) :: Nil, message) =>
     {
       val books = editorDB.booksForUser(user)
       
@@ -175,7 +181,7 @@ class HypoBot(override val bus: MessageEventBus) extends AbstractBot {
       }
     }
 
-    case Command("editor", "book" :: "copy" :: bookID(bid) :: "to" :: email(user) :: Nil, message) =>
+    case Command("copy", "book" :: bookID(bid) :: "to" :: email(user) :: Nil, message) =>
       editorDB.bookForID(bid.toInt).foreach(book => {
         val newBookID = editorDB.insertBook(book.copy(id = None, user = Some(user)))
         editorDB.bookForID(newBookID).foreach(newBook =>
@@ -183,7 +189,7 @@ class HypoBot(override val bus: MessageEventBus) extends AbstractBot {
         )
       })
 
-    case Command("editor", "book" :: delete() :: bookID(bid) :: Nil, message) =>
+    case Command(delete(), "book" :: bookID(bid) :: Nil, message) =>
       editorDB.bookForID(bid.toInt) match {
         case Some(bookToDelete) => {
           publish(OutboundMessage(message.channel, " 確定要刪除? [yes/no]"))
@@ -208,7 +214,7 @@ class HypoBot(override val bus: MessageEventBus) extends AbstractBot {
           publish(OutboundMessage(message.channel, s"找不到 $bid"))
       }
 
-    case Command("editor", "order" :: restore() :: orderID(oid) :: Nil, message) =>
+    case Command(restore(), "order" :: orderID(oid) :: Nil, message) =>
       editorDB.orderForSaleID(oid) match {
         case Some(order) => {
           val book = order.toBook
@@ -219,7 +225,7 @@ class HypoBot(override val bus: MessageEventBus) extends AbstractBot {
           publish(OutboundMessage(message.channel, s"找不到 $oid"))
       }
 
-    case Command("editor", "order" :: restore() :: orderID(oid) :: "to" :: email(user) :: Nil, message) =>
+    case Command(restore(), "order" :: orderID(oid) :: "to" :: email(user) :: Nil, message) =>
       editorDB.orderForSaleID(oid) match {
         case Some(order) => {
           val book = order.toBook.copy(user = Some(user))
@@ -230,12 +236,12 @@ class HypoBot(override val bus: MessageEventBus) extends AbstractBot {
           publish(OutboundMessage(message.channel, s"找不到 $oid"))
       }
 
-    case Command("editor", "order" :: "json" :: orderID(oid) :: Nil, message) =>
+    case Command("json", "order" :: orderID(oid) :: Nil, message) =>
       editorDB.orderForSaleID(oid) match {
         case Some(order) => {
           val json: String = Json.prettyPrint(order.data.getOrElse(Json.obj()))
           Gist(config.getString("gist-token")).createGist(s"JSON for $oid at ${new java.util.Date}", false, Set(GistFile(s"${oid}.json", json))) match {
-            case scala.util.Success(url) ⇒ publish(OutboundMessage(message.channel, url))
+            case scala.util.Success(url) ⇒ publish(OutboundMessage(message.channel, s"$oid JSON: $url"))
             case scala.util.Failure(e) ⇒ publish(OutboundMessage(message.channel, e.toString()))
           }
         }
