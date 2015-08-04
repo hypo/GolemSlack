@@ -209,16 +209,39 @@ class HypoBot(override val bus: MessageEventBus) extends AbstractBot {
       }
 
     case Command("editor", "order" :: restore() :: orderID(oid) :: Nil, message) =>
-      val response = OutboundMessage(message.channel, s"restore $oid")
-      publish(response)
+      editorDB.orderForSaleID(oid) match {
+        case Some(order) => {
+          val book = order.toBook
+          editorDB.insertBook(book)
+          publish(OutboundMessage(message.channel, s"已放回 $oid"))
+        }
+        case None =>
+          publish(OutboundMessage(message.channel, s"找不到 $oid"))
+      }
 
     case Command("editor", "order" :: restore() :: orderID(oid) :: "to" :: email(user) :: Nil, message) =>
-      val response = OutboundMessage(message.channel, s"restore $oid to $user")
-      publish(response)
+      editorDB.orderForSaleID(oid) match {
+        case Some(order) => {
+          val book = order.toBook.copy(user = Some(user))
+          editorDB.insertBook(book)
+          publish(OutboundMessage(message.channel, s"已放回 $oid"))
+        }
+        case None =>
+          publish(OutboundMessage(message.channel, s"找不到 $oid"))
+      }
 
     case Command("editor", "order" :: "json" :: orderID(oid) :: Nil, message) =>
-      val response = OutboundMessage(message.channel, s"json")
-      publish(response)
+      editorDB.orderForSaleID(oid) match {
+        case Some(order) => {
+          val json: String = Json.prettyPrint(order.data.getOrElse(Json.obj()))
+          Gist(config.getString("gist-token")).createGist(s"JSON for $oid at ${new java.util.Date}", false, Set(GistFile(s"${oid}.json", json))) match {
+            case scala.util.Success(url) ⇒ publish(OutboundMessage(message.channel, url))
+            case scala.util.Failure(e) ⇒ publish(OutboundMessage(message.channel, e.toString()))
+          }
+        }
+        case None =>
+          publish(OutboundMessage(message.channel, s"找不到 $oid"))
+      }
 
   }
 }
