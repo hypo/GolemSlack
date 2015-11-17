@@ -113,6 +113,57 @@ class HypoOrders(tag: Tag) extends Table[HypoOrder](tag, "hypo_orders") {
     backend) <> (HypoOrder.tupled, HypoOrder.unapply)
 }
 
+case class HypoProduct( id: Option[Int],
+                        productType: String,
+                        saleID: Option[String],
+                        backend: String = "tw",
+                        status: String = "new",
+                        data: Option[JsValue],
+                        user: String,
+                        createdAt: Option[Timestamp],
+                        updatedAt: Option[Timestamp]
+                      ) {
+  def restore: HypoProduct = 
+    copy(id = None, saleID = None, status = "new", createdAt = None, updatedAt = None)
+  def restoreForUser(user: String): HypoProduct = 
+    copy(id = None, saleID = None, status = "new", user = user, createdAt = None, updatedAt = None)
+}
+
+class HypoProducts(tag: Tag) extends Table[HypoProduct](tag, "hypo_products") {
+  def id = column[Int]("id", O.PrimaryKey, O.AutoInc)
+  def productType = column[String]("product_type")
+  def saleID = column[Option[String]]("sale_id")
+  def backend = column[String]("backend")
+  def status = column[String]("status")
+  def data = column[Option[JsValue]]("data")
+  def user = column[String]("user")
+  def createdAt = column[Option[Timestamp]]("created_at")
+  def updatedAt = column[Option[Timestamp]]("updated_at")
+  
+  def * = (id.?,
+           productType,
+           saleID,
+           backend,
+           status,
+           data,
+           user,
+           createdAt,
+           updatedAt) <> (HypoProduct.tupled, HypoProduct.unapply)
+}
+
+case class DateDatabase(url: String, user: String, password: String) {
+  val db = Database.forURL(url = url, user = user, password = password, driver = "org.postgresql.Driver")
+  val hypoProducts = TableQuery[HypoProducts]
+
+  def productForSaleID(saleID: String) = db withSession { implicit  session: Session =>
+    hypoProducts.filter(_.saleID === saleID).firstOption
+  }
+
+  def insertProduct(product: HypoProduct): Int = db withSession { implicit session: Session =>
+    (hypoProducts returning hypoProducts.map(_.id)) += product
+  }
+}
+
 
 case class EditorDatabase(url: String, user: String, password: String) {
   val db = Database.forURL(url = url, user = user, password = password, driver = "org.postgresql.Driver")
@@ -148,6 +199,11 @@ class HypoBot(override val bus: MessageEventBus) extends AbstractBot {
     user = config.getString("editor.db-user"),
     password = config.getString("editor.db-password")
   )
+  val dateDB = DateDatabase(
+    url = config.getString("date.db-url"),
+    user = config.getString("date.db-user"),
+    password = config.getString("date.db-password")
+  )
 
   override def help(channel: String): OutboundMessage =
     OutboundMessage(channel,
@@ -157,6 +213,8 @@ class HypoBot(override val bus: MessageEventBus) extends AbstractBot {
       "`delete book {12345}` - 刪除書本" +
       "`restore order {67890}` - 把訂單(67890) 轉回書本，放回原用戶的 editor\\n" +
       "`restore order {67890} to {user@email.com}` - 把訂單(67890) 轉回書本，放回用戶 user 的 editor\\n" +
+      "`restore date {67890}` - 把 Date 訂單(67890) 轉回編輯狀態，放回原用戶的 editor\\n" +
+      "`restore date {67890} to {user@email.com}` - 把 Date 訂單(67890) 轉回編輯狀態，放回用戶 user 的 editor\\n" +
       "`json order {67890}` - 把訂單(67890) 輸出 JSON")
 
   val of = "(?:for|of)".r
@@ -230,6 +288,15 @@ class HypoBot(override val bus: MessageEventBus) extends AbstractBot {
         case Some(order) => {
           val book = order.toBook.copy(user = Some(user))
           editorDB.insertBook(book)
+          publish(OutboundMessage(message.channel, s"已放回 $oid"))
+        }
+        case None =>
+          publish(OutboundMessage(message.channel, s"找不到 $oid"))
+      }
+    case Command(restore(), "date" :: orderID(oid) :: Nil, message) =>
+      dateDB.productForSaleID(oid) match {
+        case Some(product) => {
+          dateDB.insertProduct(product.restore)
           publish(OutboundMessage(message.channel, s"已放回 $oid"))
         }
         case None =>
