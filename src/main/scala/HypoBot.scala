@@ -293,6 +293,7 @@ class HypoBot(override val bus: MessageEventBus) extends AbstractBot {
         case None =>
           publish(OutboundMessage(message.channel, s"找不到 $oid"))
       }
+
     case Command(restore(), "date" :: orderID(oid) :: Nil, message) =>
       dateDB.productForSaleID(oid) match {
         case Some(product) => {
@@ -302,6 +303,18 @@ class HypoBot(override val bus: MessageEventBus) extends AbstractBot {
         case None =>
           publish(OutboundMessage(message.channel, s"找不到 $oid"))
       }
+
+    case Command(restore(), "date" :: orderID(oid) :: "to" :: email(user) :: Nil, message) =>
+      dateDB.productForSaleID(oid) match {
+        case Some(product) => {
+          var cloned = product.restoreForUser(user)
+          dateDB.insertProduct(cloned)
+          publish(OutboundMessage(message.channel, s"已放回 $oid"))
+        }
+        case None =>
+          publish(OutboundMessage(message.channel, s"找不到 $oid"))
+      }
+
 
     case Command("json", "order" :: orderID(oid) :: Nil, message) =>
       editorDB.orderForSaleID(oid) match {
